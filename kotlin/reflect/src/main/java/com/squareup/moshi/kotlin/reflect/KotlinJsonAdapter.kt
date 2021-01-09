@@ -62,7 +62,7 @@ internal class KotlinJsonAdapter<T>(
     val constructorSize = constructor.parameters.size
 
     // Read each value into its slot in the array.
-    val values = Array<Any?>(allBindings.size) { ABSENT_VALUE }
+    val values = IndexedParameterMap(constructor.parameters)
     reader.beginObject()
     while (reader.hasNext()) {
       val index = reader.selectName(options)
@@ -74,7 +74,7 @@ internal class KotlinJsonAdapter<T>(
       val binding = nonTransientBindings[index]
 
       val propertyIndex = binding.propertyIndex
-      if (values[propertyIndex] !== ABSENT_VALUE) {
+      if (values.containsKey(propertyIndex)) {
         throw JsonDataException(
           "Multiple values for '${binding.property.name}' at ${reader.path}"
         )
@@ -94,7 +94,7 @@ internal class KotlinJsonAdapter<T>(
 
     // Confirm all parameters are present, optional, or nullable.
     for (i in 0 until constructorSize) {
-      if (values[i] === ABSENT_VALUE && !constructor.parameters[i].isOptional) {
+      if (values.containsKey(i) && !constructor.parameters[i].isOptional) {
         if (!constructor.parameters[i].type.isMarkedNullable) {
           throw Util.missingProperty(
             constructor.parameters[i].name,
@@ -107,7 +107,10 @@ internal class KotlinJsonAdapter<T>(
     }
 
     // Call the constructor using a Map so that absent optionals get defaults.
-    val result = constructor.callBy(IndexedParameterMap(constructor.parameters, values))
+    val result = if (values.isFullInitialized())
+      SpreadWrapper.call(constructor, values.parameterValues)
+    else
+      constructor.callBy(values)
 
     // Set remaining properties.
     for (i in constructorSize until allBindings.size) {
