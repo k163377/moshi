@@ -27,7 +27,6 @@ import com.squareup.moshi.internal.Util.resolve
 import com.squareup.moshi.rawType
 import java.lang.reflect.Modifier
 import java.lang.reflect.Type
-import java.util.AbstractMap.SimpleEntry
 import kotlin.reflect.KFunction
 import kotlin.reflect.KMutableProperty1
 import kotlin.reflect.KParameter
@@ -154,28 +153,47 @@ internal class KotlinJsonAdapter<T>(
 
   /** A simple [Map] that uses parameter indexes instead of sorting or hashing. */
   class IndexedParameterMap(
-    private val parameterKeys: List<KParameter>,
-    private val parameterValues: Array<Any?>
+    private val parameterKeys: List<KParameter>
   ) : AbstractMutableMap<KParameter, Any?>() {
+    val parameterValues: Array<Any?> = Array(parameterKeys.size) { ABSENT_VALUE }
+    private val initializationStatuses: BooleanArray = BooleanArray(parameterKeys.size)
+    private var count = 0
 
-    override fun put(key: KParameter, value: Any?): Any? = null
+    fun isFullInitialized(): Boolean = parameterKeys.size == count
+
+    override fun put(key: KParameter, value: Any?): Any? = parameterValues[key.index].apply {
+      parameterValues[key.index] = value
+
+      if (!initializationStatuses[key.index]) {
+        initializationStatuses[key.index] = true
+        count++
+      }
+    }
+
+    operator fun set(index: Int, value: Any?): Any? = parameterValues[index].apply {
+      parameterValues[index] = value
+
+      if (!initializationStatuses[index]) {
+        initializationStatuses[index] = true
+        count++
+      }
+    }
+
+    operator fun get(index: Int) = parameterValues[index]
 
     override val entries: MutableSet<MutableMap.MutableEntry<KParameter, Any?>>
-      get() {
-        val allPossibleEntries = parameterKeys.mapIndexed { index, value ->
+      get() = parameterKeys.mapIndexedNotNull { index, value ->
+        if (initializationStatuses[index])
           SimpleEntry<KParameter, Any?>(value, parameterValues[index])
-        }
-        return allPossibleEntries.filterTo(mutableSetOf()) {
-          it.value !== ABSENT_VALUE
-        }
-      }
+        else
+          null
+      }.toMutableSet()
 
-    override fun containsKey(key: KParameter) = parameterValues[key.index] !== ABSENT_VALUE
+    override fun containsKey(key: KParameter) = initializationStatuses[key.index]
 
-    override fun get(key: KParameter): Any? {
-      val value = parameterValues[key.index]
-      return if (value !== ABSENT_VALUE) value else null
-    }
+    fun containsKey(index: Int) = initializationStatuses[index]
+
+    override fun get(key: KParameter): Any? = parameterValues[key.index]
   }
 }
 
